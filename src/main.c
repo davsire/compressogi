@@ -24,7 +24,7 @@ typedef struct Compressor {
 
 void adicionar_arquivo_fila(compressor_t* compressor, struct inotify_event* evento) {
   fila_arquivo_t* arquivo = malloc(sizeof(fila_arquivo_t));
-  sprintf(arquivo->nome_arquivo, "%s", evento->name);
+  snprintf(arquivo->nome_arquivo, sizeof(arquivo->nome_arquivo), "%s", evento->name);
   snprintf(arquivo->caminho_arquivo, sizeof(arquivo->caminho_arquivo), "%s/%s", compressor->origem, evento->name);
   arquivo->prox = NULL;
   pthread_mutex_lock(&compressor->mutex);
@@ -81,13 +81,13 @@ void* comprimir(void* args) {
 
   while (TRUE) {
     pthread_mutex_lock(&compressor->mutex);
-    if (compressor->fila == NULL) {
+    while (compressor->fila == NULL) {
       pthread_cond_wait(&compressor->var_cond, &compressor->mutex);
     }
     fila_arquivo_t* arquivo = remover_fila(&compressor->fila);
     pthread_mutex_unlock(&compressor->mutex);
   
-    printf("[COMPRESSOR %lu] Comprimindo arquivo '%s'\n", pthread_self(), arquivo->nome_arquivo);
+    printf("[COMPRESSOR %lu] Comprimindo arquivo '%s'\n", (unsigned long)pthread_self(), arquivo->nome_arquivo);
     char destino_zip[CAMINHO_MAX];
     snprintf(destino_zip, sizeof(destino_zip), "%s/%s.zip", compressor->destino, arquivo->nome_arquivo);
   
@@ -96,22 +96,28 @@ void* comprimir(void* args) {
   
     mz_bool iniciado = mz_zip_writer_init_file(&zip_archive, destino_zip, 0);
     if (!iniciado) {
-      printf("[COMPRESSOR %lu] Erro ao inicializar arquivo zip\n", pthread_self());
+      printf("[COMPRESSOR %lu] Erro ao inicializar arquivo zip\n", (unsigned long)pthread_self());
+      mz_zip_writer_end(&zip_archive);
+      free(arquivo);
+      continue;
     }
   
     mz_bool adicionado = mz_zip_writer_add_file(&zip_archive, arquivo->nome_arquivo, arquivo->caminho_arquivo, NULL, 0, MZ_BEST_COMPRESSION);
     if (!adicionado) {
-      printf("[COMPRESSOR %lu] Erro ao adicionar arquivo '%s' no zip\n", pthread_self(), arquivo->nome_arquivo);
+      printf("[COMPRESSOR %lu] Erro ao adicionar arquivo '%s' no zip\n", (unsigned long)pthread_self(), arquivo->nome_arquivo);
       mz_zip_writer_end(&zip_archive);
+      free(arquivo);
+      continue;
     }
   
     mz_bool finalizado = mz_zip_writer_finalize_archive(&zip_archive) && mz_zip_writer_end(&zip_archive);
     if (!finalizado) {
-      printf("[COMPRESSOR %lu] Erro ao finalizar compressão\n", pthread_self());
-      mz_zip_writer_end(&zip_archive);
+      printf("[COMPRESSOR %lu] Erro ao finalizar compressão\n", (unsigned long)pthread_self());
+      free(arquivo);
+      continue;
     }
   
-    printf("[COMPRESSOR %lu] Arquivo '%s' comprimido com sucesso\n", pthread_self(), arquivo->nome_arquivo);
+    printf("[COMPRESSOR %lu] Arquivo '%s' comprimido com sucesso\n", (unsigned long)pthread_self(), arquivo->nome_arquivo);
     if (compressor->remover_arquivo) {
       remove(arquivo->caminho_arquivo);
     }
@@ -127,8 +133,8 @@ int main(int argc, char** argv) {
   }
 
   compressor_t compressor;
-  sprintf(compressor.origem, "%s", argv[1]);
-  sprintf(compressor.destino, "%s", argv[2]);
+  snprintf(compressor.origem, sizeof(compressor.origem), "%s", argv[1]);
+  snprintf(compressor.destino, sizeof(compressor.destino), "%s", argv[2]);
   compressor.remover_arquivo = (argc > 3 && !strcmp(argv[3], "s")) ? TRUE : FALSE;
   compressor.fila = NULL;
   pthread_mutex_init(&compressor.mutex, NULL);
