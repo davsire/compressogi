@@ -27,6 +27,7 @@ void adicionar_arquivo_fila(compressor_t* compressor, struct inotify_event* even
   snprintf(arquivo->nome_arquivo, sizeof(arquivo->nome_arquivo), "%s", evento->name);
   snprintf(arquivo->caminho_arquivo, sizeof(arquivo->caminho_arquivo), "%s/%s", compressor->origem, evento->name);
   arquivo->prox = NULL;
+
   pthread_mutex_lock(&compressor->mutex);
   adicionar_fila(&compressor->fila, arquivo);
   pthread_mutex_unlock(&compressor->mutex);
@@ -44,7 +45,7 @@ void* monitorar(void* args) {
     exit(2);
   }
 
-  wd = inotify_add_watch(fd, compressor->origem, IN_CLOSE_WRITE);
+  wd = inotify_add_watch(fd, compressor->origem, IN_CLOSE_WRITE | IN_MOVED_TO);
   if (wd < 0) {
     printf("[MONITOR] Erro ao criar monitor para pasta '%s'...\n", compressor->origem);
     exit(2);
