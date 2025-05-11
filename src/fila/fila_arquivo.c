@@ -8,11 +8,11 @@ void adicionar_fila(fila_arquivo_t** fila, fila_arquivo_t* arquivo) {
     return;
   }
 
-  fila_arquivo_t* noAtual = *fila;
-  while (noAtual->prox != NULL) {
-    noAtual = noAtual->prox;
+  fila_arquivo_t* no_atual = *fila;
+  while (no_atual->prox != NULL) {
+    no_atual = no_atual->prox;
   }
-  noAtual->prox = arquivo;
+  no_atual->prox = arquivo;
 }
 
 fila_arquivo_t* remover_fila(fila_arquivo_t** fila) {

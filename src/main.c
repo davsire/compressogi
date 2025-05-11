@@ -24,8 +24,8 @@ typedef struct Compressor {
 
 void adicionar_arquivo_fila(compressor_t* compressor, struct inotify_event* evento) {
   fila_arquivo_t* arquivo = malloc(sizeof(fila_arquivo_t));
-  sprintf(arquivo->nomeArquivo, "%s", evento->name);
-  snprintf(arquivo->caminhoArquivo, sizeof(arquivo->caminhoArquivo), "%s/%s", compressor->origem, evento->name);
+  sprintf(arquivo->nome_arquivo, "%s", evento->name);
+  snprintf(arquivo->caminho_arquivo, sizeof(arquivo->caminho_arquivo), "%s/%s", compressor->origem, evento->name);
   arquivo->prox = NULL;
   pthread_mutex_lock(&compressor->mutex);
   adicionar_fila(&compressor->fila, arquivo);
@@ -35,8 +35,7 @@ void adicionar_arquivo_fila(compressor_t* compressor, struct inotify_event* even
 
 void* monitorar(void* args) {
   compressor_t* compressor = (compressor_t*) args;
-  int fd, wd;
-  int tamanhoBuffer, i;
+  int fd, wd, tamanho_buffer, i;
   char buffer[BUFF_MAX];
 
   fd = inotify_init();
@@ -52,15 +51,15 @@ void* monitorar(void* args) {
   }
 
   printf("[MONITOR] Monitorando pasta '%s'\n", compressor->origem);
-  while (1) {
+  while (TRUE) {
     i = 0;
-    tamanhoBuffer = read(fd, buffer, BUFF_MAX);
-    if (tamanhoBuffer < 0) {
+    tamanho_buffer = read(fd, buffer, BUFF_MAX);
+    if (tamanho_buffer < 0) {
       printf("[MONITOR] Erro ao ler conteúdo do monitor...\n");
       exit(2);
     }
   
-    while (i < tamanhoBuffer) {
+    while (i < tamanho_buffer) {
       struct inotify_event* evento = (struct inotify_event*) &buffer[i];
 
       if (evento->len) {
@@ -80,29 +79,29 @@ void* monitorar(void* args) {
 void* comprimir(void* args) {
   compressor_t* compressor = (compressor_t*) args;
 
-  while (1) {
-    pthread_mutex_unlock(&compressor->mutex);
+  while (TRUE) {
+    pthread_mutex_lock(&compressor->mutex);
     if (compressor->fila == NULL) {
       pthread_cond_wait(&compressor->var_cond, &compressor->mutex);
     }
     fila_arquivo_t* arquivo = remover_fila(&compressor->fila);
     pthread_mutex_unlock(&compressor->mutex);
   
-    printf("[COMPRESSOR %lu] Comprimindo arquivo '%s'\n", pthread_self(), arquivo->nomeArquivo);
-    char destinoZip[CAMINHO_MAX];
-    snprintf(destinoZip, sizeof(destinoZip), "%s/%s.zip", compressor->destino, arquivo->nomeArquivo);
+    printf("[COMPRESSOR %lu] Comprimindo arquivo '%s'\n", pthread_self(), arquivo->nome_arquivo);
+    char destino_zip[CAMINHO_MAX];
+    snprintf(destino_zip, sizeof(destino_zip), "%s/%s.zip", compressor->destino, arquivo->nome_arquivo);
   
     mz_zip_archive zip_archive;
     memset(&zip_archive, 0, sizeof(mz_zip_archive));
   
-    mz_bool iniciado = mz_zip_writer_init_file(&zip_archive, destinoZip, 0);
+    mz_bool iniciado = mz_zip_writer_init_file(&zip_archive, destino_zip, 0);
     if (!iniciado) {
       printf("[COMPRESSOR %lu] Erro ao inicializar arquivo zip\n", pthread_self());
     }
   
-    mz_bool adicionado = mz_zip_writer_add_file(&zip_archive, arquivo->nomeArquivo, arquivo->caminhoArquivo, NULL, 0, MZ_BEST_COMPRESSION);
+    mz_bool adicionado = mz_zip_writer_add_file(&zip_archive, arquivo->nome_arquivo, arquivo->caminho_arquivo, NULL, 0, MZ_BEST_COMPRESSION);
     if (!adicionado) {
-      printf("[COMPRESSOR %lu] Erro ao adicionar arquivo '%s' no zip\n", pthread_self(), arquivo->nomeArquivo);
+      printf("[COMPRESSOR %lu] Erro ao adicionar arquivo '%s' no zip\n", pthread_self(), arquivo->nome_arquivo);
       mz_zip_writer_end(&zip_archive);
     }
   
@@ -112,9 +111,9 @@ void* comprimir(void* args) {
       mz_zip_writer_end(&zip_archive);
     }
   
-    printf("[COMPRESSOR %lu] Arquivo '%s' comprimido com sucesso\n", pthread_self(), arquivo->nomeArquivo);
+    printf("[COMPRESSOR %lu] Arquivo '%s' comprimido com sucesso\n", pthread_self(), arquivo->nome_arquivo);
     if (compressor->remover_arquivo) {
-      remove(arquivo->caminhoArquivo);
+      remove(arquivo->caminho_arquivo);
     }
     free(arquivo);
   }
@@ -122,17 +121,14 @@ void* comprimir(void* args) {
 
 int main(int argc, char** argv) {
   if (argc < 3) {
-    printf("Informe o caminho completo da pasta origem e destino:\n");
+    printf("Informe o caminho da pasta origem e destino:\n");
     printf("%s <pasta_origem> <pasta_destino> <remover_arquivo [s/N]>\n", argv[0]);
     exit(1);
   }
 
-  char* pastaOrigem = argv[1];
-  char* pastaDestino = argv[2];
-
   compressor_t compressor;
-  sprintf(compressor.origem, "%s", pastaOrigem);
-  sprintf(compressor.destino, "%s", pastaDestino);
+  sprintf(compressor.origem, "%s", argv[1]);
+  sprintf(compressor.destino, "%s", argv[2]);
   compressor.remover_arquivo = (argc > 3 && !strcmp(argv[3], "s")) ? TRUE : FALSE;
   compressor.fila = NULL;
   pthread_mutex_init(&compressor.mutex, NULL);
@@ -141,14 +137,14 @@ int main(int argc, char** argv) {
   pthread_t monitor;
   pthread_create(&monitor, NULL, monitorar, &compressor);
 
-  pthread_t poolCompressor[NUM_THREAD_POOL];
+  pthread_t pool_compressor[NUM_THREAD_POOL];
   for (int i = 0; i < NUM_THREAD_POOL; i++) {
-    pthread_create(&poolCompressor[i], NULL, comprimir, &compressor);
+    pthread_create(&pool_compressor[i], NULL, comprimir, &compressor);
   }
 
   pthread_join(monitor, NULL);
   for (int i = 0; i < NUM_THREAD_POOL; i++) {
-    pthread_join(poolCompressor[i], NULL);
+    pthread_join(pool_compressor[i], NULL);
   }
 
   exit(0);

@@ -5,8 +5,8 @@
 #define CAMINHO_MAX 4096
 
 typedef struct FilaArquivo {
-  char nomeArquivo[NOME_MAX];
-  char caminhoArquivo[CAMINHO_MAX];
+  char nome_arquivo[NOME_MAX];
+  char caminho_arquivo[CAMINHO_MAX];
   struct FilaArquivo* prox;
 } fila_arquivo_t;
 
