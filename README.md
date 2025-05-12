@@ -36,3 +36,4 @@ Execute o programa da seguinte forma:
 
 - Aplicação desenvolvida para sistemas baseados em Linux.
 - Certificar-se que os diretórios fornecidos existem e têm permissões adequadas.
+- Programa utiliza [Miniz](https://github.com/richgel999/miniz) para realizar a compressão em formato zip.
