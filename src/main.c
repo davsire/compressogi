@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
+#include <dirent.h>
 #include <sys/inotify.h>
 #include <pthread.h>
 #include "fila/fila_arquivo.h"
@@ -47,11 +48,11 @@ void* monitorar(void* args) {
 
   wd = inotify_add_watch(fd, compressor->origem, IN_CLOSE_WRITE | IN_MOVED_TO);
   if (wd < 0) {
-    printf("[MONITOR] Erro ao criar monitor para pasta '%s'...\n", compressor->origem);
+    printf("[MONITOR] Erro ao criar monitor para diretório '%s'...\n", compressor->origem);
     exit(2);
   }
 
-  printf("[MONITOR] Monitorando pasta '%s'\n", compressor->origem);
+  printf("[MONITOR] Monitorando diretório '%s'\n", compressor->origem);
   while (TRUE) {
     i = 0;
     tamanho_buffer = read(fd, buffer, BUFF_MAX);
@@ -128,8 +129,8 @@ void* comprimir(void* args) {
 
 int main(int argc, char** argv) {
   if (argc < 3) {
-    printf("Informe o caminho da pasta origem e destino:\n");
-    printf("%s <pasta_origem> <pasta_destino> <remover_arquivo [s/N]>\n", argv[0]);
+    printf("Informe o caminho do diretório origem e destino:\n");
+    printf("%s <diretorio_origem> <diretorio_destino> <remover_arquivo [s/N]>\n", argv[0]);
     exit(1);
   }
 
