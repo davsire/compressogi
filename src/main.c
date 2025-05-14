@@ -8,7 +8,7 @@
 #include "fila/fila_arquivo.h"
 #include "miniz/miniz.h"
 
-#define NUM_THREAD_POOL 10
+#define NUM_THREAD_COMPRESSOR 10
 #define TAMANHO_EVENTO (sizeof(struct inotify_event))
 #define BUFF_MAX (10 * (TAMANHO_EVENTO + NOME_MAX + 1))
 #define TRUE 1
@@ -127,12 +127,30 @@ void* comprimir(void* args) {
   }
 }
 
+void validar_diretorios(char* origem, char* destino) {
+  DIR* diretorio = opendir(origem);
+  if (!diretorio) {
+    printf("O diretório origem '%s' não existe ou foi informado incorretamente!\n", origem);
+    exit(2);
+  }
+  closedir(diretorio);
+
+  diretorio = opendir(destino);
+  if (!diretorio) {
+    printf("O diretório destino '%s' não existe ou foi informado incorretamente!\n", destino);
+    exit(2);
+  }
+  closedir(diretorio);
+}
+
 int main(int argc, char** argv) {
   if (argc < 3) {
     printf("Informe o caminho do diretório origem e destino:\n");
     printf("%s <diretorio_origem> <diretorio_destino> <remover_arquivo [s/N]>\n", argv[0]);
     exit(1);
   }
+
+  validar_diretorios(argv[1], argv[2]);
 
   compressor_t compressor;
   snprintf(compressor.origem, sizeof(compressor.origem), "%s", argv[1]);
@@ -145,14 +163,14 @@ int main(int argc, char** argv) {
   pthread_t monitor;
   pthread_create(&monitor, NULL, monitorar, &compressor);
 
-  pthread_t pool_compressor[NUM_THREAD_POOL];
-  for (int i = 0; i < NUM_THREAD_POOL; i++) {
-    pthread_create(&pool_compressor[i], NULL, comprimir, &compressor);
+  pthread_t compressores[NUM_THREAD_COMPRESSOR];
+  for (int i = 0; i < NUM_THREAD_COMPRESSOR; i++) {
+    pthread_create(&compressores[i], NULL, comprimir, &compressor);
   }
 
   pthread_join(monitor, NULL);
-  for (int i = 0; i < NUM_THREAD_POOL; i++) {
-    pthread_join(pool_compressor[i], NULL);
+  for (int i = 0; i < NUM_THREAD_COMPRESSOR; i++) {
+    pthread_join(compressores[i], NULL);
   }
 
   exit(0);
