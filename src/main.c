@@ -70,7 +70,8 @@ void* monitorar(void* args) {
 
       if (evento->len) {
         printf("[MONITOR] Arquivo '%s' enviado para compressão\n", evento->name);
-        adicionar_arquivo_fila(&parametros_compressor->fila_comprimir, criar_arquivo(parametros_compressor, evento));
+        arquivo_t* arquivo = criar_arquivo(parametros_compressor, evento);
+        adicionar_arquivo_fila(&parametros_compressor->fila_comprimir, arquivo);
       }
   
       i += TAMANHO_EVENTO + evento->len;
@@ -160,14 +161,14 @@ void* registrar_log(void* args) {
 void validar_diretorios(char* origem, char* destino) {
   DIR* diretorio = opendir(origem);
   if (!diretorio) {
-    printf("[MAIN] O diretório origem '%s' não existe ou foi informado incorretamente!\n", origem);
+    printf("[COMPRESSOGI] O diretório origem '%s' não existe ou foi informado incorretamente!\n", origem);
     exit(2);
   }
   closedir(diretorio);
 
   diretorio = opendir(destino);
   if (!diretorio) {
-    printf("[MAIN] O diretório destino '%s' não existe ou foi informado incorretamente!\n", destino);
+    printf("[COMPRESSOGI] O diretório destino '%s' não existe ou foi informado incorretamente!\n", destino);
     exit(2);
   }
   closedir(diretorio);
@@ -182,7 +183,7 @@ void inicializar_parametros_compressor(parametros_compressor_t* parametros_compr
 
 int main(int argc, char** argv) {
   if (argc < 3) {
-    printf("[MAIN] Informe o caminho do diretório origem e destino:\n");
+    printf("[COMPRESSOGI] Informe o caminho do diretório origem e destino:\n");
     printf("%s <diretorio_origem> <diretorio_destino>\n", argv[0]);
     exit(1);
   }
@@ -204,6 +205,7 @@ int main(int argc, char** argv) {
   pthread_create(&logger, NULL, registrar_log, &parametros_compressor);
 
   pthread_join(monitor, NULL);
+  pthread_join(logger, NULL);
   for (int i = 0; i < NUM_THREAD_COMPRESSOR; i++) {
     pthread_join(compressores[i], NULL);
   }
