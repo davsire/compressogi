@@ -4,9 +4,9 @@
 #include <string.h>
 #include <dirent.h>
 #include <sys/inotify.h>
+#include <sys/stat.h>
 #include <pthread.h>
-#include "filas/fila_comprimir.h"
-#include "filas/fila_log.h"
+#include "fila/fila_arquivo.h"
 #include "miniz/miniz.h"
 
 #define NUM_THREAD_COMPRESSOR 10
@@ -20,20 +20,24 @@ typedef struct ParametrosCompressor {
   char origem[CAMINHO_MAX];
   char destino[CAMINHO_MAX];
   int remover_arquivo;
-  fila_comprimir_t fila_comprimir;
-  fila_log_t fila_log;
+  fila_arquivo_t fila_comprimir;
+  fila_arquivo_t fila_log;
 } parametros_compressor_t;
 
-void adicionar_arquivo_comprimir(parametros_compressor_t* parametros_compressor, struct inotify_event* evento) {
-  arquivo_comprimir_t* arquivo = malloc(sizeof(arquivo_comprimir_t));
+arquivo_t* criar_arquivo(parametros_compressor_t* parametros_compressor, struct inotify_event* evento) {
+  arquivo_t* arquivo = malloc(sizeof(arquivo_t));
   snprintf(arquivo->nome_arquivo, sizeof(arquivo->nome_arquivo), "%s", evento->name);
   snprintf(arquivo->caminho_arquivo, sizeof(arquivo->caminho_arquivo), "%s/%s", parametros_compressor->origem, evento->name);
+  snprintf(arquivo->caminho_zip, sizeof(arquivo->caminho_zip), "%s/%s.zip", parametros_compressor->destino, evento->name);
   arquivo->prox = NULL;
+  return arquivo;
+}
 
-  pthread_mutex_lock(&parametros_compressor->fila_comprimir.mutex);
-  adicionar_fila_comprimir(&parametros_compressor->fila_comprimir, arquivo);
-  pthread_mutex_unlock(&parametros_compressor->fila_comprimir.mutex);
-  pthread_cond_signal(&parametros_compressor->fila_comprimir.var_cond);
+void adicionar_arquivo_fila(fila_arquivo_t* fila, arquivo_t* arquivo) {
+  pthread_mutex_lock(&fila->mutex);
+  adicionar_fila(fila, arquivo);
+  pthread_mutex_unlock(&fila->mutex);
+  pthread_cond_signal(&fila->var_cond);
 }
 
 void* monitorar(void* args) {
@@ -67,7 +71,7 @@ void* monitorar(void* args) {
 
       if (evento->len) {
         printf("[MONITOR] Arquivo '%s' enviado para compressão\n", evento->name);
-        adicionar_arquivo_comprimir(parametros_compressor, evento);
+        adicionar_arquivo_fila(&parametros_compressor->fila_comprimir, criar_arquivo(parametros_compressor, evento));
       }
   
       i += TAMANHO_EVENTO + evento->len;
@@ -79,23 +83,6 @@ void* monitorar(void* args) {
   close(fd);
 }
 
-void adicionar_arquivo_log(parametros_compressor_t* parametros_compressor, arquivo_comprimir_t* arquivo, char* caminho_zip) {
-  arquivo_log_t* arquivo_log = malloc(sizeof(arquivo_log_t));
-  snprintf(arquivo_log->nome_arquivo, sizeof(arquivo_log->nome_arquivo), "%s", arquivo->nome_arquivo);
-  arquivo_log->prox = NULL;
-  
-  struct stat infos_arquivo;
-  stat(arquivo->caminho_arquivo, &infos_arquivo);
-  arquivo_log->tamanhoOriginal = infos_arquivo.st_size;  
-  stat(caminho_zip, &infos_arquivo);
-  arquivo_log->tamanhoCompressao = infos_arquivo.st_size;
-
-  pthread_mutex_lock(&parametros_compressor->fila_log.mutex);
-  adicionar_fila_log(&parametros_compressor->fila_log, arquivo_log);
-  pthread_mutex_unlock(&parametros_compressor->fila_log.mutex);
-  pthread_cond_signal(&parametros_compressor->fila_log.var_cond);
-}
-
 void* comprimir(void* args) {
   parametros_compressor_t* parametros_compressor = (parametros_compressor_t*) args;
 
@@ -104,17 +91,15 @@ void* comprimir(void* args) {
     while (parametros_compressor->fila_comprimir.vazia) {
       pthread_cond_wait(&parametros_compressor->fila_comprimir.var_cond, &parametros_compressor->fila_comprimir.mutex);
     }
-    arquivo_comprimir_t* arquivo = remover_fila_comprimir(&parametros_compressor->fila_comprimir);
+    arquivo_t* arquivo = remover_fila(&parametros_compressor->fila_comprimir);
     pthread_mutex_unlock(&parametros_compressor->fila_comprimir.mutex);
 
     printf("[COMPRESSOR %lu] Comprimindo arquivo '%s'\n", (unsigned long)pthread_self(), arquivo->nome_arquivo);
-    char destino_zip[CAMINHO_MAX];
-    snprintf(destino_zip, sizeof(destino_zip), "%s/%s.zip", parametros_compressor->destino, arquivo->nome_arquivo);
 
     mz_zip_archive zip_archive;
     memset(&zip_archive, 0, sizeof(mz_zip_archive));
 
-    mz_bool iniciado = mz_zip_writer_init_file(&zip_archive, destino_zip, 0);
+    mz_bool iniciado = mz_zip_writer_init_file(&zip_archive, arquivo->caminho_zip, 0);
     if (!iniciado) {
       printf("[COMPRESSOR %lu] Erro ao inicializar arquivo zip\n", (unsigned long)pthread_self());
       mz_zip_writer_end(&zip_archive);
@@ -138,11 +123,10 @@ void* comprimir(void* args) {
     }
 
     printf("[COMPRESSOR %lu] Arquivo '%s' comprimido com sucesso\n", (unsigned long)pthread_self(), arquivo->nome_arquivo);
-    adicionar_arquivo_log(parametros_compressor, arquivo, destino_zip);
+    adicionar_arquivo_fila(&parametros_compressor->fila_log, arquivo);
     if (parametros_compressor->remover_arquivo) {
       remove(arquivo->caminho_arquivo);
     }
-    free(arquivo);
   }
 }
 
@@ -160,12 +144,18 @@ void* registrar_log(void* args) {
     while (parametros_compressor->fila_log.vazia) {
       pthread_cond_wait(&parametros_compressor->fila_log.var_cond, &parametros_compressor->fila_log.mutex);
     }
-    arquivo_log_t* arquivo_log = remover_fila_log(&parametros_compressor->fila_log);
+    arquivo_t* arquivo = remover_fila(&parametros_compressor->fila_log);
     pthread_mutex_unlock(&parametros_compressor->fila_log.mutex);
 
-    fprintf(log, "%s | %lld bytes --> %lld bytes\n", arquivo_log->nome_arquivo, arquivo_log->tamanhoOriginal, arquivo_log->tamanhoCompressao);
+    struct stat infos_arquivo;
+    stat(arquivo->caminho_arquivo, &infos_arquivo);
+    long long tamanhoOriginal = infos_arquivo.st_size;
+    stat(arquivo->caminho_zip, &infos_arquivo);
+    long long tamanhoCompressao = infos_arquivo.st_size;
+
+    fprintf(log, "%s | %lld bytes --> %lld bytes\n", arquivo->nome_arquivo, tamanhoOriginal, tamanhoCompressao);
     fflush(log);
-    free(arquivo_log);
+    free(arquivo);
   }
 
   fclose(log);
@@ -174,14 +164,14 @@ void* registrar_log(void* args) {
 void validar_diretorios(char* origem, char* destino) {
   DIR* diretorio = opendir(origem);
   if (!diretorio) {
-    printf("O diretório origem '%s' não existe ou foi informado incorretamente!\n", origem);
+    printf("[MAIN] O diretório origem '%s' não existe ou foi informado incorretamente!\n", origem);
     exit(2);
   }
   closedir(diretorio);
 
   diretorio = opendir(destino);
   if (!diretorio) {
-    printf("O diretório destino '%s' não existe ou foi informado incorretamente!\n", destino);
+    printf("[MAIN] O diretório destino '%s' não existe ou foi informado incorretamente!\n", destino);
     exit(2);
   }
   closedir(diretorio);
@@ -191,13 +181,13 @@ void inicializar_parametros_compressor(parametros_compressor_t* parametros_compr
   snprintf(parametros_compressor->origem, sizeof(parametros_compressor->origem), "%s", argv[1]);
   snprintf(parametros_compressor->destino, sizeof(parametros_compressor->destino), "%s", argv[2]);
   parametros_compressor->remover_arquivo = (argc > 3 && !strcmp(argv[3], "s")) ? TRUE : FALSE;
-  inicializar_fila_comprimir(&parametros_compressor->fila_comprimir);
-  inicializar_fila_log(&parametros_compressor->fila_log);
+  inicializar_fila(&parametros_compressor->fila_comprimir);
+  inicializar_fila(&parametros_compressor->fila_log);
 }
 
 int main(int argc, char** argv) {
   if (argc < 3) {
-    printf("Informe o caminho do diretório origem e destino:\n");
+    printf("[MAIN] Informe o caminho do diretório origem e destino:\n");
     printf("%s <diretorio_origem> <diretorio_destino> <remover_arquivo [s/N]>\n", argv[0]);
     exit(1);
   }
