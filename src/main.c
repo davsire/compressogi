@@ -6,11 +6,13 @@
 #include <sys/inotify.h>
 #include <pthread.h>
 #include "filas/fila_comprimir.h"
+#include "filas/fila_log.h"
 #include "miniz/miniz.h"
 
 #define NUM_THREAD_COMPRESSOR 10
 #define TAMANHO_EVENTO (sizeof(struct inotify_event))
 #define BUFF_MAX (10 * (TAMANHO_EVENTO + NOME_MAX + 1))
+#define NOME_ARQUIVO_LOG "log.txt"
 #define TRUE 1
 #define FALSE 0
 
@@ -19,6 +21,7 @@ typedef struct ParametrosCompressor {
   char destino[CAMINHO_MAX];
   int remover_arquivo;
   fila_comprimir_t fila_comprimir;
+  fila_log_t fila_log;
 } parametros_compressor_t;
 
 void adicionar_arquivo_comprimir(parametros_compressor_t* parametros_compressor, struct inotify_event* evento) {
@@ -76,6 +79,23 @@ void* monitorar(void* args) {
   close(fd);
 }
 
+void adicionar_arquivo_log(parametros_compressor_t* parametros_compressor, arquivo_comprimir_t* arquivo, char* caminho_zip) {
+  arquivo_log_t* arquivo_log = malloc(sizeof(arquivo_log_t));
+  snprintf(arquivo_log->nome_arquivo, sizeof(arquivo_log->nome_arquivo), "%s", arquivo->nome_arquivo);
+  arquivo_log->prox = NULL;
+  
+  struct stat infos_arquivo;
+  stat(arquivo->caminho_arquivo, &infos_arquivo);
+  arquivo_log->tamanhoOriginal = infos_arquivo.st_size;  
+  stat(caminho_zip, &infos_arquivo);
+  arquivo_log->tamanhoCompressao = infos_arquivo.st_size;
+
+  pthread_mutex_lock(&parametros_compressor->fila_log.mutex);
+  adicionar_fila_log(&parametros_compressor->fila_log, arquivo_log);
+  pthread_mutex_unlock(&parametros_compressor->fila_log.mutex);
+  pthread_cond_signal(&parametros_compressor->fila_log.var_cond);
+}
+
 void* comprimir(void* args) {
   parametros_compressor_t* parametros_compressor = (parametros_compressor_t*) args;
 
@@ -118,11 +138,37 @@ void* comprimir(void* args) {
     }
 
     printf("[COMPRESSOR %lu] Arquivo '%s' comprimido com sucesso\n", (unsigned long)pthread_self(), arquivo->nome_arquivo);
+    adicionar_arquivo_log(parametros_compressor, arquivo, destino_zip);
     if (parametros_compressor->remover_arquivo) {
       remove(arquivo->caminho_arquivo);
     }
     free(arquivo);
   }
+}
+
+void* registrar_log(void* args) {
+  parametros_compressor_t* parametros_compressor = (parametros_compressor_t*) args;
+  FILE* log = fopen(NOME_ARQUIVO_LOG, "w");
+
+  if (!log) {
+    printf("[LOGGER] Não foi possível criar o arquivo de log...\n");
+    exit(4);
+  }
+
+  while (TRUE) {
+    pthread_mutex_lock(&parametros_compressor->fila_log.mutex);
+    while (parametros_compressor->fila_log.vazia) {
+      pthread_cond_wait(&parametros_compressor->fila_log.var_cond, &parametros_compressor->fila_log.mutex);
+    }
+    arquivo_log_t* arquivo_log = remover_fila_log(&parametros_compressor->fila_log);
+    pthread_mutex_unlock(&parametros_compressor->fila_log.mutex);
+
+    fprintf(log, "%s | %lld bytes --> %lld bytes\n", arquivo_log->nome_arquivo, arquivo_log->tamanhoOriginal, arquivo_log->tamanhoCompressao);
+    fflush(log);
+    free(arquivo_log);
+  }
+
+  fclose(log);
 }
 
 void validar_diretorios(char* origem, char* destino) {
@@ -146,6 +192,7 @@ void inicializar_parametros_compressor(parametros_compressor_t* parametros_compr
   snprintf(parametros_compressor->destino, sizeof(parametros_compressor->destino), "%s", argv[2]);
   parametros_compressor->remover_arquivo = (argc > 3 && !strcmp(argv[3], "s")) ? TRUE : FALSE;
   inicializar_fila_comprimir(&parametros_compressor->fila_comprimir);
+  inicializar_fila_log(&parametros_compressor->fila_log);
 }
 
 int main(int argc, char** argv) {
@@ -167,6 +214,9 @@ int main(int argc, char** argv) {
   for (int i = 0; i < NUM_THREAD_COMPRESSOR; i++) {
     pthread_create(&compressores[i], NULL, comprimir, &parametros_compressor);
   }
+
+  pthread_t logger;
+  pthread_create(&logger, NULL, registrar_log, &parametros_compressor);
 
   pthread_join(monitor, NULL);
   for (int i = 0; i < NUM_THREAD_COMPRESSOR; i++) {
