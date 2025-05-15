@@ -19,7 +19,6 @@
 typedef struct ParametrosCompressor {
   char origem[CAMINHO_MAX];
   char destino[CAMINHO_MAX];
-  int remover_arquivo;
   fila_arquivo_t fila_comprimir;
   fila_arquivo_t fila_log;
 } parametros_compressor_t;
@@ -124,9 +123,6 @@ void* comprimir(void* args) {
 
     printf("[COMPRESSOR %lu] Arquivo '%s' comprimido com sucesso\n", (unsigned long)pthread_self(), arquivo->nome_arquivo);
     adicionar_arquivo_fila(&parametros_compressor->fila_log, arquivo);
-    if (parametros_compressor->remover_arquivo) {
-      remove(arquivo->caminho_arquivo);
-    }
   }
 }
 
@@ -180,7 +176,6 @@ void validar_diretorios(char* origem, char* destino) {
 void inicializar_parametros_compressor(parametros_compressor_t* parametros_compressor, int argc, char** argv) {
   snprintf(parametros_compressor->origem, sizeof(parametros_compressor->origem), "%s", argv[1]);
   snprintf(parametros_compressor->destino, sizeof(parametros_compressor->destino), "%s", argv[2]);
-  parametros_compressor->remover_arquivo = (argc > 3 && !strcmp(argv[3], "s")) ? TRUE : FALSE;
   inicializar_fila(&parametros_compressor->fila_comprimir);
   inicializar_fila(&parametros_compressor->fila_log);
 }
@@ -188,7 +183,7 @@ void inicializar_parametros_compressor(parametros_compressor_t* parametros_compr
 int main(int argc, char** argv) {
   if (argc < 3) {
     printf("[MAIN] Informe o caminho do diretório origem e destino:\n");
-    printf("%s <diretorio_origem> <diretorio_destino> <remover_arquivo [s/N]>\n", argv[0]);
+    printf("%s <diretorio_origem> <diretorio_destino>\n", argv[0]);
     exit(1);
   }
 

@@ -19,12 +19,11 @@ make all
 Execute o programa da seguinte forma:
 
 ```bash
-./compressogi <diretorio_origem> <diretorio_destino> <remover_arquivo>
+./compressogi <diretorio_origem> <diretorio_destino>
 ```
 
 - `<diretorio_origem>`: Caminho da diretório a ser monitorada.
 - `<diretorio_destino>`: Caminho onde os arquivos zipados serão salvos.
-- `<remover_arquivo>`: Parâmetro opcional, indica se é para excluir arquivos da diretório origem após compressão (aceita valores `s` e `n`, sendo `n` o padrão).
 
 ### Exemplo:
 
