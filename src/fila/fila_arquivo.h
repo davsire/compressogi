@@ -5,6 +5,8 @@
 
 #define NOME_MAX 255
 #define CAMINHO_MAX 4096
+#define TRUE 1
+#define FALSE 0
 
 typedef struct Arquivo {
   char nome_arquivo[NOME_MAX];

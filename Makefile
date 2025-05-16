@@ -1,5 +1,5 @@
 TARGET = compressogi
-SRC = src/main.c src/fila/fila_arquivo.c src/miniz/miniz.c
+SRC = src/main.c src/fila/fila_arquivo.c src/prod_cons/prod_cons.c src/miniz/miniz.c
 CC = gcc
 FLAGS = -pthread -Wformat-truncation=0
 

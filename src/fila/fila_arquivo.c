@@ -1,8 +1,4 @@
-#include <pthread.h>
 #include "fila_arquivo.h"
-
-#define TRUE 1
-#define FALSE 0
 
 void inicializar_fila(fila_arquivo_t* fila) {
   fila->cabeca = NULL;

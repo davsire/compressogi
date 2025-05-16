@@ -7,9 +7,11 @@
 #include <sys/stat.h>
 #include <pthread.h>
 #include "fila/fila_arquivo.h"
+#include "prod_cons/prod_cons.h"
 #include "miniz/miniz.h"
 
 #define NUM_THREAD_COMPRESSOR 10
+#define TAM_BUFFER_PROD_CONS 5
 #define TAMANHO_EVENTO (sizeof(struct inotify_event))
 #define BUFF_MAX (10 * (TAMANHO_EVENTO + NOME_MAX + 1))
 #define NOME_ARQUIVO_LOG "log.txt"
@@ -20,7 +22,7 @@ typedef struct ParametrosCompressor {
   char origem[CAMINHO_MAX];
   char destino[CAMINHO_MAX];
   fila_arquivo_t fila_comprimir;
-  fila_arquivo_t fila_log;
+  fila_prod_cons_t fila_prod_cons;
 } parametros_compressor_t;
 
 arquivo_t* criar_arquivo(parametros_compressor_t* parametros_compressor, struct inotify_event* evento) {
@@ -123,7 +125,7 @@ void* comprimir(void* args) {
     }
 
     printf("[COMPRESSOR %lu] Arquivo '%s' comprimido com sucesso\n", (unsigned long)pthread_self(), arquivo->nome_arquivo);
-    adicionar_arquivo_fila(&parametros_compressor->fila_log, arquivo);
+    produzir(&parametros_compressor->fila_prod_cons, (void*) arquivo);
   }
 }
 
@@ -137,12 +139,7 @@ void* registrar_log(void* args) {
   }
 
   while (TRUE) {
-    pthread_mutex_lock(&parametros_compressor->fila_log.mutex);
-    while (parametros_compressor->fila_log.vazia) {
-      pthread_cond_wait(&parametros_compressor->fila_log.var_cond, &parametros_compressor->fila_log.mutex);
-    }
-    arquivo_t* arquivo = remover_fila(&parametros_compressor->fila_log);
-    pthread_mutex_unlock(&parametros_compressor->fila_log.mutex);
+    arquivo_t* arquivo = (arquivo_t*) consumir(&parametros_compressor->fila_prod_cons);
 
     struct stat infos_arquivo;
     stat(arquivo->caminho_arquivo, &infos_arquivo);
@@ -178,7 +175,7 @@ void inicializar_parametros_compressor(parametros_compressor_t* parametros_compr
   snprintf(parametros_compressor->origem, sizeof(parametros_compressor->origem), "%s", argv[1]);
   snprintf(parametros_compressor->destino, sizeof(parametros_compressor->destino), "%s", argv[2]);
   inicializar_fila(&parametros_compressor->fila_comprimir);
-  inicializar_fila(&parametros_compressor->fila_log);
+  inicializar_fila_prod_cons(&parametros_compressor->fila_prod_cons, TAM_BUFFER_PROD_CONS, sizeof(arquivo_t*));
 }
 
 int main(int argc, char** argv) {
