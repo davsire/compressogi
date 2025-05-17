@@ -22,7 +22,7 @@ Execute o programa da seguinte forma:
 ./compressogi <diretorio_origem> <diretorio_destino>
 ```
 
-- `<diretorio_origem>`: Caminho da diretório a ser monitorada.
+- `<diretorio_origem>`: Caminho do diretório a ser monitorado.
 - `<diretorio_destino>`: Caminho onde os arquivos zipados serão salvos.
 
 ### Exemplo:
