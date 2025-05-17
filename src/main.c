@@ -5,6 +5,7 @@
 #include <dirent.h>
 #include <sys/inotify.h>
 #include <sys/stat.h>
+#include <signal.h>
 #include <pthread.h>
 #include "fila/fila_arquivo.h"
 #include "prod_cons/prod_cons.h"
@@ -12,8 +13,8 @@
 
 #define NUM_THREAD_COMPRESSOR 10
 #define TAM_BUFFER_PROD_CONS 5
-#define TAMANHO_EVENTO (sizeof(struct inotify_event))
-#define BUFF_MAX (10 * (TAMANHO_EVENTO + NOME_MAX + 1))
+#define TAM_EVENTO (sizeof(struct inotify_event))
+#define TAM_BUFFER_EVENTO (10 * (TAM_EVENTO + NOME_MAX + 1))
 #define NOME_ARQUIVO_LOG "log.txt"
 #define TRUE 1
 #define FALSE 0
@@ -21,6 +22,9 @@
 typedef struct ParametrosCompressor {
   char origem[CAMINHO_MAX];
   char destino[CAMINHO_MAX];
+  FILE* log;
+  int monitor_fd;
+  int monitor_wd;
   fila_arquivo_t fila_comprimir;
   fila_prod_cons_t fila_prod_cons;
 } parametros_compressor_t;
@@ -43,17 +47,17 @@ void adicionar_arquivo_fila(fila_arquivo_t* fila, arquivo_t* arquivo) {
 
 void* monitorar(void* args) {
   parametros_compressor_t* parametros_compressor = (parametros_compressor_t*) args;
-  int fd, wd, tamanho_buffer, i;
-  char buffer[BUFF_MAX];
+  int tamanho_buffer, i;
+  char buffer[TAM_BUFFER_EVENTO];
 
-  fd = inotify_init();
-  if (fd < 0) {
+  parametros_compressor->monitor_fd = inotify_init();
+  if (parametros_compressor->monitor_fd < 0) {
     printf("[MONITOR] Erro ao inicializar monitor...\n");
     exit(3);
   }
 
-  wd = inotify_add_watch(fd, parametros_compressor->origem, IN_CLOSE_WRITE | IN_MOVED_TO);
-  if (wd < 0) {
+  parametros_compressor->monitor_wd = inotify_add_watch(parametros_compressor->monitor_fd, parametros_compressor->origem, IN_CLOSE_WRITE | IN_MOVED_TO);
+  if (parametros_compressor->monitor_wd < 0) {
     printf("[MONITOR] Erro ao criar monitor para diretório '%s'...\n", parametros_compressor->origem);
     exit(3);
   }
@@ -61,7 +65,7 @@ void* monitorar(void* args) {
   printf("[MONITOR] Monitorando diretório '%s'\n", parametros_compressor->origem);
   while (TRUE) {
     i = 0;
-    tamanho_buffer = read(fd, buffer, BUFF_MAX);
+    tamanho_buffer = read(parametros_compressor->monitor_fd, buffer, TAM_BUFFER_EVENTO);
     if (tamanho_buffer < 0) {
       printf("[MONITOR] Erro ao ler conteúdo do monitor...\n");
       exit(3);
@@ -76,13 +80,9 @@ void* monitorar(void* args) {
         adicionar_arquivo_fila(&parametros_compressor->fila_comprimir, arquivo);
       }
   
-      i += TAMANHO_EVENTO + evento->len;
+      i += TAM_EVENTO + evento->len;
     }
   }
-
-  printf("[MONITOR] Monitoramento finalizado\n");
-  inotify_rm_watch(fd, wd);
-  close(fd);
 }
 
 void* comprimir(void* args) {
@@ -131,9 +131,9 @@ void* comprimir(void* args) {
 
 void* registrar_log(void* args) {
   parametros_compressor_t* parametros_compressor = (parametros_compressor_t*) args;
-  FILE* log = fopen(NOME_ARQUIVO_LOG, "w");
+  parametros_compressor->log = fopen(NOME_ARQUIVO_LOG, "w");
 
-  if (!log) {
+  if (!parametros_compressor->log) {
     printf("[LOGGER] Não foi possível criar o arquivo de log...\n");
     exit(4);
   }
@@ -147,12 +147,14 @@ void* registrar_log(void* args) {
     stat(arquivo->caminho_zip, &infos_arquivo);
     long long tamanhoCompressao = infos_arquivo.st_size;
 
-    fprintf(log, "%s | %lld bytes --> %lld bytes\n", arquivo->nome_arquivo, tamanhoOriginal, tamanhoCompressao);
-    fflush(log);
+    fprintf(parametros_compressor->log, "%s | %lld bytes --> %lld bytes\n", arquivo->nome_arquivo, tamanhoOriginal, tamanhoCompressao);
+    fflush(parametros_compressor->log);
     free(arquivo);
   }
+}
 
-  fclose(log);
+void finalizar_programa() {
+  printf("[COMPRESSOGI] Finalizando programa...\n");
 }
 
 void validar_diretorios(char* origem, char* destino) {
@@ -178,6 +180,12 @@ void inicializar_parametros_compressor(parametros_compressor_t* parametros_compr
   inicializar_fila_prod_cons(&parametros_compressor->fila_prod_cons, TAM_BUFFER_PROD_CONS, sizeof(arquivo_t*));
 }
 
+void limpar_parametros_compressor(parametros_compressor_t* parametros_compressor) {
+  fclose(parametros_compressor->log);
+  inotify_rm_watch(parametros_compressor->monitor_fd, parametros_compressor->monitor_wd);
+  close(parametros_compressor->monitor_fd);
+}
+
 int main(int argc, char** argv) {
   if (argc < 3) {
     printf("[COMPRESSOGI] Informe o caminho do diretório origem e destino:\n");
@@ -185,8 +193,9 @@ int main(int argc, char** argv) {
     exit(1);
   }
 
+  signal(SIGINT, finalizar_programa);
   validar_diretorios(argv[1], argv[2]);
-  
+
   parametros_compressor_t parametros_compressor;
   inicializar_parametros_compressor(&parametros_compressor, argc, argv);
 
@@ -201,11 +210,13 @@ int main(int argc, char** argv) {
   pthread_t logger;
   pthread_create(&logger, NULL, registrar_log, &parametros_compressor);
 
-  pthread_join(monitor, NULL);
-  pthread_join(logger, NULL);
+  pause();
+  pthread_cancel(monitor);
+  pthread_cancel(logger);
   for (int i = 0; i < NUM_THREAD_COMPRESSOR; i++) {
-    pthread_join(compressores[i], NULL);
+    pthread_cancel(compressores[i]);
   }
+  limpar_parametros_compressor(&parametros_compressor);
 
   exit(0);
 }
