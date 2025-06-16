@@ -1,11 +1,13 @@
 #ifndef PROD_CONS_H
 #define PROD_CONS_H
 
+#include <pthread.h>
 #include <semaphore.h>
 
 typedef struct FilaProdCons {
   sem_t semaforo_ocupado;
   sem_t semaforo_vazio;
+  pthread_mutex_t mutex;
   int indice_atual;
   void* buffer[];
 } fila_prod_cons_t;
